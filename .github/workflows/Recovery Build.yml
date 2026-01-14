@@ -151,6 +151,12 @@ jobs:
       uses: pierotofy/set-swap-space@master
       with:
         swap-size-gb: 12
+        
+    - name: Clean existing device trees
+      run: |
+        rm -rf device/transsion/mt6789-common || true
+        # Or more aggressive if needed (but careful not to delete everything!)
+        # rm -rf device/transsion || true
 
     - name: Building recovery
       run: |
