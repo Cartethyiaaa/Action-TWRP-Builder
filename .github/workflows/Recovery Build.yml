@@ -160,6 +160,9 @@ jobs:
 
     - name: Building recovery
       run: |
+        export TERM=xterm-256color
+        # or simpler (almost always works):
+        export TERM=xterm
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-userdebug && make clean && make ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
