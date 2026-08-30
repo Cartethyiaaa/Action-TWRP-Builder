@@ -14,11 +14,11 @@ on:
       DEVICE_TREE_URL:
         description: 'DEVICE_TREE_URL'
         required: true
-        default: 'https://github.com/Cartethyiaaa/twrp_device_infinix_X6886'
+        default: 'https://github.com/Cartethyiaaa/yo'
       DEVICE_TREE_BRANCH:
         description: 'DEVICE_TREE_BRANCH'
         required: true
-        default: 'pbrp-12.1'
+        default: 'main'
       DEVICE_PATH:
         description: 'DEVICE_PATH'
         required: true
@@ -75,7 +75,7 @@ jobs:
     - name: Prepare the environment
       run: |
         sudo apt update
-        DEBIAN_FRONTEND=noninteractive sudo apt install -yq \
+        DEBIAN_FRONTEND=noninteractive sudo apt install -yq --no-install-recommends \
             linux-modules-extra-$(uname -r) \
             gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib \
             libc6-dev lib32ncurses-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils \
@@ -133,7 +133,8 @@ jobs:
 
     - name: Repo Sync
       run: |
-        repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags --optimized-fetch --prune
+        SYNC_JOBS=$(( $(nproc --all) * 2 ))
+        repo sync -c -j${SYNC_JOBS} --force-sync --no-clone-bundle --no-tags --no-repo-verify --optimized-fetch --prune
       working-directory: workspace
 
     - name: Clone device tree
@@ -159,10 +160,38 @@ jobs:
 
     - name: Sync Device Dependencies
       run: |
+        SYNC_JOBS=$(( $(nproc --all) * 2 ))
         bash ${GITHUB_WORKSPACE}/scripts/convert.sh ${{ github.event.inputs.DEVICE_PATH }}/${{ steps.buildtree.outputs.value }}.dependencies
-        repo sync -c -j$(nproc --all) --no-clone-bundle --no-tags --optimized-fetch
+        repo sync -c -j${SYNC_JOBS} --no-clone-bundle --no-tags --no-repo-verify --optimized-fetch
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
       continue-on-error: true
+
+    - name: Apply Patches
+      run: |
+        PATCH_DIR="${{ github.event.inputs.DEVICE_PATH }}/patches"
+        if [ ! -d "$PATCH_DIR" ]; then
+          echo "[*] No patches directory found, skipping."
+          exit 0
+        fi
+
+        for f in $(find "$PATCH_DIR" -maxdepth 1 -type f | sort); do
+          case "$f" in
+            *.sh)
+              echo "[*] Running script: $f"
+              chmod +x "$f"
+              bash "$f"
+              ;;
+            *.patch|*.diff)
+              echo "[*] Applying patch: $f"
+              git apply --directory=. --verbose "$f" \
+                || patch -p1 --no-backup-if-mismatch < "$f"
+              ;;
+            *)
+              echo "[!] Skipping unknown file type: $f"
+              ;;
+          esac
+        done
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Set Swap Space
       uses: pierotofy/set-swap-space@master
@@ -172,6 +201,7 @@ jobs:
     - name: Clean existing device trees
       run: |
         rm -rf device/transsion/mt6789-common || true
+      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Building recovery
       run: |
@@ -179,7 +209,10 @@ jobs:
         export USE_CCACHE=1
         export CCACHE_EXEC=$(which ccache)
         export CCACHE_DIR=~/.ccache
-        ccache -M 20G
+        export CCACHE_COMPRESS=1
+        export CCACHE_COMPRESSLEVEL=6
+        ccache -M 30G
+        ccache -z
         source build/envsetup.sh
         export ALLOW_MISSING_DEPENDENCIES=true
         lunch ${{ github.event.inputs.MAKEFILE_NAME }}-userdebug
@@ -187,6 +220,9 @@ jobs:
           make clean
         fi
         m ${{ github.event.inputs.BUILD_TARGET }} -j$(nproc --all)
+        echo "::group::ccache stats"
+        ccache -s
+        echo "::endgroup::"
       working-directory: ${{ steps.pwd.outputs.workspace-folder }}
 
     - name: Upload to Release
