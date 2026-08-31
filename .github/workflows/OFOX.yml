@@ -1,113 +1,91 @@
-name: OrangeFox Build
+name: OrangeFox - Build
 
 on:
   workflow_dispatch:
     inputs:
-      MANIFEST_URL:
-        description: 'MANIFEST_URL (if want to use SSH keys, use git@github.com:XXXXX)'
-        required: true
-        default: 'https://gitlab.com/OrangeFox/Manifest.git'
       MANIFEST_BRANCH:
-        description: 'MANIFEST_BRANCH'
+        description: 'OrangeFox Branch'
         required: true
-        default: 'fox_16.0'
-      DEVICE_TREE_URL:
-        description: 'DEVICE_TREE_URL'
+        default: '14.1'
+        type: choice
+        options:
+        - 14.1
+        - 12.1
+        - 11.0
+      DEVICE_TREE:
+        description: 'Device Recovery Tree'
         required: true
         default: 'https://github.com/Cartethyiaaa/yo'
       DEVICE_TREE_BRANCH:
-        description: 'DEVICE_TREE_BRANCH'
+        description: 'Custom Recovery Tree Branch'
         required: true
         default: 'main'
       DEVICE_PATH:
-        description: 'DEVICE_PATH'
+        description: 'Specify your device path.'
         required: true
         default: 'device/infinix/X6886'
-      COMMON_TREE_URL:
-        description: 'COMMON_TREE_URL (if no common tree, leave blank)'
-        required: false
-      COMMON_PATH:
-        description: 'COMMON_PATH (if no common tree, leave blank)'
-        required: false
       DEVICE_NAME:
-        description: 'DEVICE_NAME'
+        description: 'Specify your Device Codename.'
         required: true
         default: 'X6886'
-      MAKEFILE_NAME:
-        description: 'MAKEFILE_NAME (lunch combo name, without the variant)'
-        required: true
-        default: 'ofox_X6886'
-      BUILD_VARIANT:
-        description: 'BUILD_VARIANT (eng, userdebug, user)'
-        required: true
-        default: 'eng'
       BUILD_TARGET:
-        description: 'BUILD_TARGET (make target, e.g. recoveryimage)'
+        description: 'Specify your Build Target'
         required: true
-        default: 'recoveryimage'
+        default: 'vendorboot'
+        type: choice
+        options:
+        - boot
+        - recovery
+        - vendorboot
       CLEAN_BUILD:
         description: 'Force full clean build (slower, use only if build is broken/stale)'
         required: false
-        default: 'false'
+        default: false
+        type: boolean
 
 jobs:
   build:
+    name: Build OFRP by ${{ github.actor }}
+    runs-on: ubuntu-latest
     if: github.event.repository.owner.id == github.event.sender.id
-    runs-on: ubuntu-24.04
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      FOX_DIR: ${{ github.workspace }}/OrangeFox/fox_${{ github.event.inputs.MANIFEST_BRANCH }}
     permissions:
       contents: write
     steps:
-    - name: Display Run Parameters
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Display Inputs
       run: |
         echo "::group::User Environment Variables"
-        echo "Manifest URL: ${{ github.event.inputs.MANIFEST_URL }}"
-        echo "Manifest Branch: ${{ github.event.inputs.MANIFEST_BRANCH }}"
-        echo "Device Tree URL: ${{ github.event.inputs.DEVICE_TREE_URL }}"
-        echo "Device Tree Branch: ${{ github.event.inputs.DEVICE_TREE_BRANCH }}"
-        echo "Device Path: ${{ github.event.inputs.DEVICE_PATH }}"
-        echo "Device Name: ${{ github.event.inputs.DEVICE_NAME }}"
-        echo "Makefile Name: ${{ github.event.inputs.MAKEFILE_NAME }}-${{ github.event.inputs.BUILD_VARIANT }}"
-        echo "Build Target: ${{ github.event.inputs.BUILD_TARGET }}"
+        echo "Manifest Branch : ${{ github.event.inputs.MANIFEST_BRANCH }}"
+        echo "Device Tree     : ${{ github.event.inputs.DEVICE_TREE }} (${{ github.event.inputs.DEVICE_TREE_BRANCH }})"
+        echo "Device Path     : ${{ github.event.inputs.DEVICE_PATH }}"
+        echo "Device Name     : ${{ github.event.inputs.DEVICE_NAME }}"
+        echo "Build Target    : ${{ github.event.inputs.BUILD_TARGET }}image"
         echo "::endgroup::"
 
-    - name: Check Out
-      uses: actions/checkout@v4
-
-    - name: Cleanup
+    - name: Clean-up
       uses: rokibhasansagar/slimhub_actions@main
 
-    - name: Prepare the environment
+    - name: Swap Space
+      uses: pierotofy/set-swap-space@master
+      with:
+        swap-size-gb: 24
+
+    - name: Build Environment
       run: |
+        set -e
         sudo apt update
-        DEBIAN_FRONTEND=noninteractive sudo apt install -yq --no-install-recommends \
-            linux-modules-extra-$(uname -r) \
-            gperf gcc-multilib gcc-10-multilib g++-multilib g++-10-multilib \
-            libc6-dev lib32ncurses-dev x11proto-core-dev libx11-dev tree lib32z-dev libgl1-mesa-dev libxml2-utils \
-            xsltproc bc ccache lib32readline-dev lib32z1-dev liblz4-tool libncurses-dev libsdl1.2-dev \
-            build-essential libgtk-3-dev libglu1-mesa-dev freeglut3-dev git libxml2 lzop pngcrush schedtool squashfs-tools \
-            imagemagick libbz2-dev lzma ncftp qemu-user-static libstdc++-10-dev libncurses6 python3 tar
-
-    - name: Install OpenJDK
-      uses: actions/setup-java@v4
-      with:
-        distribution: 'zulu'
-        java-version: '11'
-
-    - name: Setup SSH Keys
-      if: ${{ startsWith(github.event.inputs.MANIFEST_URL, 'git@github.com') || 
-          startsWith(github.event.inputs.DEVICE_TREE_URL, 'git@github.com') ||
-          startsWith(github.event.inputs.COMMON_TREE_URL, 'git@github.com') }}
-      uses: webfactory/ssh-agent@v0.9.0
-      with:
-          ssh-private-key: |
-            ${{ secrets.SSH_PRIVATE_KEY }}
-
-    - name: Install repo
-      run: |
-        mkdir ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
+        sudo apt -y upgrade
+        rm -rf scripts
+        git clone https://gitlab.com/OrangeFox/misc/scripts
+        cd scripts
+        sudo bash setup/android_build_env.sh
+        # android_build_env.sh usually installs ccache, but make sure it's there
+        sudo apt -y install ccache
 
     - name: Restore ccache
       uses: actions/cache@v4
@@ -117,63 +95,32 @@ jobs:
         restore-keys: |
           ccache-${{ github.event.inputs.DEVICE_NAME }}-${{ github.event.inputs.MANIFEST_BRANCH }}-
 
-    - name: Initialize repo
+    - name: Set-up Manifest
       run: |
-        mkdir workspace
-        cd workspace
-        echo "workspace-folder=$(pwd)" >> $GITHUB_OUTPUT
-        git config --global user.name "Nico170420"
-        git config --global user.email "b170420nc@gmail.com"
-        repo init --depth=1 --no-tags -u ${{ github.event.inputs.MANIFEST_URL }} -b ${{ github.event.inputs.MANIFEST_BRANCH }}
-      id: pwd
+        set -e
+        mkdir -p ${{ github.workspace }}/OrangeFox
+        cd ${{ github.workspace }}/OrangeFox
+        git config --global user.name "Samuel Kendall"
+        git config --global user.email "kinguser981@gmail.com"
+        git clone https://gitlab.com/OrangeFox/sync.git
+        cd sync
+        ./orangefox_sync.sh --branch ${{ github.event.inputs.MANIFEST_BRANCH }} --path "$FOX_DIR"
 
-    - name: Restore .repo cache
-      uses: actions/cache@v4
-      with:
-        path: workspace/.repo/project-objects
-        key: repo-${{ github.event.inputs.MANIFEST_URL }}-${{ github.event.inputs.MANIFEST_BRANCH }}-${{ github.run_id }}
-        restore-keys: |
-          repo-${{ github.event.inputs.MANIFEST_URL }}-${{ github.event.inputs.MANIFEST_BRANCH }}-
-
-    - name: Repo Sync
-      run: |
-        SYNC_JOBS=$(( $(nproc --all) * 2 ))
-        repo sync -c -j${SYNC_JOBS} --force-sync --no-clone-bundle --no-tags --no-repo-verify --optimized-fetch --prune
-      working-directory: workspace
-
-    - name: Clone device tree
-      run: |
-        git clone --depth=1 ${{ github.event.inputs.DEVICE_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
-    - name: Clone common tree
-      if: |
-        github.event.inputs.COMMON_TREE_URL != null
-        && github.event.inputs.COMMON_PATH != null
-      run: |
-        git clone --depth=1 ${{ github.event.inputs.COMMON_TREE_URL }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.COMMON_PATH }}
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-
-    - name: Check Build Tree
-      uses: haya14busa/action-cond@v1
-      id: buildtree
-      with:
-        cond: ${{ github.event.inputs.MANIFEST_BRANCH == 'twrp-11' || github.event.inputs.MANIFEST_BRANCH == 'twrp-12.1' }}
-        if_true: twrp
-        if_false: omni
-
-    - name: Sync Device Dependencies
-      run: |
-        DEPS_FILE="${{ github.event.inputs.DEVICE_PATH }}/${{ steps.buildtree.outputs.value }}.dependencies"
-        if [ ! -f "$DEPS_FILE" ]; then
-          echo "[*] No $DEPS_FILE found in device tree, skipping local manifest sync."
-          exit 0
+        # Fail fast with a clear message instead of a confusing error later
+        # if the sync silently produced an incomplete tree.
+        if [ ! -d "$FOX_DIR/build" ]; then
+          echo "::error::Manifest sync did not produce a build/ directory at $FOX_DIR. Aborting."
+          exit 1
         fi
-        SYNC_JOBS=$(( $(nproc --all) * 2 ))
-        bash ${GITHUB_WORKSPACE}/scripts/convert.sh "$DEPS_FILE"
-        repo sync -c -j${SYNC_JOBS} --no-clone-bundle --no-tags --no-repo-verify --optimized-fetch
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
-      continue-on-error: true
+
+    - name: Clone Device Tree
+      run: |
+        set -e
+        cd "$FOX_DIR"
+        rm -rf "${{ github.event.inputs.DEVICE_PATH }}"
+        git clone ${{ github.event.inputs.DEVICE_TREE }} -b ${{ github.event.inputs.DEVICE_TREE_BRANCH }} ./${{ github.event.inputs.DEVICE_PATH }}
+        cd ${{ github.event.inputs.DEVICE_PATH }}
+        echo "COMMIT_ID=$(git rev-parse HEAD)" >> $GITHUB_ENV
 
     - name: Apply Patches
       run: |
@@ -200,51 +147,63 @@ jobs:
               ;;
           esac
         done
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+      working-directory: ${{ env.FOX_DIR }}
 
-    - name: Set Swap Space
-      uses: pierotofy/set-swap-space@master
-      with:
-        swap-size-gb: 12
-
-    - name: Clean existing device trees
+    - name: Determine Lunch Combo
+      id: lunch
       run: |
-        rm -rf device/transsion/mt6789-common || true
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+        if [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "11.0" ] || [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "12.1" ]; then
+          echo "combo=ofox_${{ github.event.inputs.DEVICE_NAME }}-eng" >> $GITHUB_OUTPUT
+        else
+          echo "combo=omni_${{ github.event.inputs.DEVICE_NAME }}-eng" >> $GITHUB_OUTPUT
+        fi
 
     - name: Building recovery
       run: |
+        set -e
+        cd "$FOX_DIR"
         export TERM=xterm
         export USE_CCACHE=1
         export CCACHE_EXEC=$(which ccache)
         export CCACHE_DIR=~/.ccache
         export CCACHE_COMPRESS=1
         export CCACHE_COMPRESSLEVEL=6
+        export ALLOW_MISSING_DEPENDENCIES=true
         ccache -M 30G
         ccache -z
+
         source build/envsetup.sh
-        export ALLOW_MISSING_DEPENDENCIES=true
-        lunch ${{ github.event.inputs.MAKEFILE_NAME }}-${{ github.event.inputs.BUILD_VARIANT }}
+        lunch ${{ steps.lunch.outputs.combo }}
+
         if [ "${{ github.event.inputs.CLEAN_BUILD }}" = "true" ]; then
           make clean
         fi
-        mka ${{ github.event.inputs.BUILD_TARGET }} -j$(nproc --all)
+
+        mka adbd ${{ github.event.inputs.BUILD_TARGET }}image -j$(nproc --all)
+
         echo "::group::ccache stats"
         ccache -s
         echo "::endgroup::"
-      working-directory: ${{ steps.pwd.outputs.workspace-folder }}
+
+        OUT_DIR="out/target/product/${{ github.event.inputs.DEVICE_NAME }}"
+        if [ -z "$(find "$OUT_DIR" -maxdepth 1 \( -name '*.img' -o -name '*.zip' \) 2>/dev/null)" ]; then
+          echo "::error::Build finished but no .img/.zip output was found in $OUT_DIR. Something went wrong even though mka returned success."
+          exit 1
+        fi
+        echo "OUT_DIR=$FOX_DIR/$OUT_DIR" >> $GITHUB_ENV
 
     - name: Upload to Release
       uses: softprops/action-gh-release@v2
       with:
-        files: | 
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.img
-          workspace/out/target/product/${{ github.event.inputs.DEVICE_NAME }}/*.zip
+        files: |
+          ${{ env.OUT_DIR }}/*.img
+          ${{ env.OUT_DIR }}/*.zip
         name: ${{ github.event.inputs.DEVICE_NAME }}-${{ github.run_id }}
         tag_name: ${{ github.run_id }}
         body: |
           Manifest: ${{ github.event.inputs.MANIFEST_BRANCH }}
           Device: ${{ github.event.inputs.DEVICE_NAME }}
-          Target: ${{ github.event.inputs.BUILD_TARGET }}
+          Target: ${{ github.event.inputs.BUILD_TARGET }}image
+          Device Tree Commit: ${{ env.COMMIT_ID }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
