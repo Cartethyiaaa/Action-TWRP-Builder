@@ -152,11 +152,14 @@ jobs:
     - name: Determine Lunch Combo
       id: lunch
       run: |
-        if [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "11.0" ] || [ "${{ github.event.inputs.MANIFEST_BRANCH }}" = "12.1" ]; then
-          echo "combo=ofox_${{ github.event.inputs.DEVICE_NAME }}-eng" >> $GITHUB_OUTPUT
-        else
-          echo "combo=omni_${{ github.event.inputs.DEVICE_NAME }}-eng" >> $GITHUB_OUTPUT
-        fi
+        # Confirmed from this device tree's own vendorsetup.sh:
+        #   add_lunch_combo ofox_X6886-eng
+        # The product is always registered as "ofox_<DEVICE_NAME>",
+        # regardless of manifest branch. Since ~Q1 2024 AOSP also requires
+        # the 3-segment <product>-<release>-<variant> form; "trunk_staging"
+        # is the universal default release name unless this tree defines
+        # its own release config.
+        echo "combo=ofox_${{ github.event.inputs.DEVICE_NAME }}-trunk_staging-eng" >> $GITHUB_OUTPUT
 
     - name: Building recovery
       run: |
@@ -173,7 +176,11 @@ jobs:
         ccache -z
 
         source build/envsetup.sh
-        lunch ${{ steps.lunch.outputs.combo }}
+        echo "[*] Trying lunch combo: ${{ steps.lunch.outputs.combo }}"
+        if ! lunch ${{ steps.lunch.outputs.combo }}; then
+          echo "::error::lunch failed for combo '${{ steps.lunch.outputs.combo }}'. If AOSP printed 'Available releases are: ...' above, that lists the exact release name this tree expects — rerun with that name substituted for 'trunk_staging'."
+          exit 1
+        fi
 
         if [ "${{ github.event.inputs.CLEAN_BUILD }}" = "true" ]; then
           make clean
