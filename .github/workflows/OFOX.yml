@@ -155,11 +155,10 @@ jobs:
         # Confirmed from this device tree's own vendorsetup.sh:
         #   add_lunch_combo ofox_X6886-eng
         # The product is always registered as "ofox_<DEVICE_NAME>",
-        # regardless of manifest branch. Since ~Q1 2024 AOSP also requires
-        # the 3-segment <product>-<release>-<variant> form; "trunk_staging"
-        # is the universal default release name unless this tree defines
-        # its own release config.
-        echo "combo=ofox_${{ github.event.inputs.DEVICE_NAME }}-trunk_staging-eng" >> $GITHUB_OUTPUT
+        # regardless of manifest branch. AOSP's release_config.mk error
+        # output confirmed the only valid release name for fox_14.1 is "ap2a"
+        # (not the "trunk_staging" default used by most other trees).
+        echo "combo=ofox_${{ github.event.inputs.DEVICE_NAME }}-ap2a-eng" >> $GITHUB_OUTPUT
 
     - name: Building recovery
       run: |
